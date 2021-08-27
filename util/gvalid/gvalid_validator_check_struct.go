@@ -7,7 +7,7 @@
 package gvalid
 
 import (
-	"github.com/gogf/gf/errors/gerror"
+	"github.com/gogf/gf/errors/gcode"
 	"github.com/gogf/gf/internal/structs"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/gogf/gf/util/gutil"
@@ -25,7 +25,11 @@ func (v *Validator) doCheckStruct(object interface{}) Error {
 		errorMaps           = make(map[string]map[string]string) // Returning error.
 		fieldToAliasNameMap = make(map[string]string)            // Field name to alias name map.
 	)
-	fieldMap, err := structs.FieldMap(object, aliasNameTagPriority, true)
+	fieldMap, err := structs.FieldMap(structs.FieldMapInput{
+		Pointer:          object,
+		PriorityTagArray: aliasNameTagPriority,
+		RecursiveOption:  structs.RecursiveOptionEmbedded,
+	})
 	if err != nil {
 		return newErrorStr(internalObjectErrRuleName, err.Error())
 	}
@@ -284,7 +288,7 @@ func (v *Validator) doCheckStruct(object interface{}) Error {
 		}
 	}
 	if len(errorMaps) > 0 {
-		return newError(gerror.CodeValidationFailed, checkRules, errorMaps)
+		return newError(gcode.CodeValidationFailed, checkRules, errorMaps)
 	}
 	return nil
 }

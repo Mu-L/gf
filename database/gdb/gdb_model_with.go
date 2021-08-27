@@ -8,6 +8,7 @@ package gdb
 
 import (
 	"fmt"
+	"github.com/gogf/gf/errors/gcode"
 	"reflect"
 
 	"github.com/gogf/gf/errors/gerror"
@@ -17,7 +18,7 @@ import (
 	"github.com/gogf/gf/text/gstr"
 )
 
-// With creates and returns an ORM model based on meta data of given object.
+// With creates and returns an ORM model based on metadata of given object.
 // It also enables model association operations feature on given `object`.
 // It can be called multiple times to add one or more objects to model and enable
 // their mode association operations feature.
@@ -63,13 +64,17 @@ func (m *Model) doWithScanStruct(pointer interface{}) error {
 		err                 error
 		allowedTypeStrArray = make([]string, 0)
 	)
-	fieldMap, err := structs.FieldMap(pointer, nil, false)
+	currentStructFieldMap, err := structs.FieldMap(structs.FieldMapInput{
+		Pointer:          pointer,
+		PriorityTagArray: nil,
+		RecursiveOption:  structs.RecursiveOptionEmbeddedNoTag,
+	})
 	if err != nil {
 		return err
 	}
 	// It checks the with array and automatically calls the ScanList to complete association querying.
 	if !m.withAll {
-		for _, field := range fieldMap {
+		for _, field := range currentStructFieldMap {
 			for _, withItem := range m.withArray {
 				withItemReflectValueType, err := structs.StructType(withItem)
 				if err != nil {
@@ -79,14 +84,14 @@ func (m *Model) doWithScanStruct(pointer interface{}) error {
 					fieldTypeStr                = gstr.TrimAll(field.Type().String(), "*[]")
 					withItemReflectValueTypeStr = gstr.TrimAll(withItemReflectValueType.String(), "*[]")
 				)
-				// It does select operation if the field type is in the specified with type array.
+				// It does select operation if the field type is in the specified "with" type array.
 				if gstr.Compare(fieldTypeStr, withItemReflectValueTypeStr) == 0 {
 					allowedTypeStrArray = append(allowedTypeStrArray, fieldTypeStr)
 				}
 			}
 		}
 	}
-	for _, field := range fieldMap {
+	for _, field := range currentStructFieldMap {
 		var (
 			fieldTypeStr    = gstr.TrimAll(field.Type().String(), "*[]")
 			parsedTagOutput = m.parseWithTagInFieldStruct(field)
@@ -94,42 +99,40 @@ func (m *Model) doWithScanStruct(pointer interface{}) error {
 		if parsedTagOutput.With == "" {
 			continue
 		}
+		// It just handlers "with" type attribute struct, so it ignores other struct types.
 		if !m.withAll && !gstr.InArray(allowedTypeStrArray, fieldTypeStr) {
 			continue
 		}
 		array := gstr.SplitAndTrim(parsedTagOutput.With, "=")
 		if len(array) == 1 {
-			// It supports using only one column name
+			// It also supports using only one column name
 			// if both tables associates using the same column name.
 			array = append(array, parsedTagOutput.With)
 		}
 		var (
-			model             *Model
-			fieldKeys         []string
-			relatedFieldName  = array[0]
-			relatedAttrName   = array[1]
-			relatedFieldValue interface{}
+			model              *Model
+			fieldKeys          []string
+			relatedSourceName  = array[0]
+			relatedTargetName  = array[1]
+			relatedTargetValue interface{}
 		)
 		// Find the value of related attribute from `pointer`.
-		for attributeName, attributeValue := range fieldMap {
-			if utils.EqualFoldWithoutChars(attributeName, relatedAttrName) {
-				relatedFieldValue = attributeValue.Value.Interface()
+		for attributeName, attributeValue := range currentStructFieldMap {
+			if utils.EqualFoldWithoutChars(attributeName, relatedTargetName) {
+				relatedTargetValue = attributeValue.Value.Interface()
 				break
 			}
 		}
-		if relatedFieldValue == nil {
+		if relatedTargetValue == nil {
 			return gerror.NewCodef(
-				gerror.CodeInvalidParameter,
-				`cannot find the related value for attribute name "%s" of with tag "%s"`,
-				relatedAttrName, parsedTagOutput.With,
+				gcode.CodeInvalidParameter,
+				`cannot find the target related value of name "%s" in with tag "%s" for attribute "%s.%s"`,
+				relatedTargetName, parsedTagOutput.With, reflect.TypeOf(pointer).Elem(), field.Name(),
 			)
 		}
 		bindToReflectValue := field.Value
-		switch bindToReflectValue.Kind() {
-		case reflect.Array, reflect.Slice:
-			if bindToReflectValue.CanAddr() {
-				bindToReflectValue = bindToReflectValue.Addr()
-			}
+		if bindToReflectValue.Kind() != reflect.Ptr && bindToReflectValue.CanAddr() {
+			bindToReflectValue = bindToReflectValue.Addr()
 		}
 
 		// It automatically retrieves struct field names from current attribute struct/slice.
@@ -153,7 +156,7 @@ func (m *Model) doWithScanStruct(pointer interface{}) error {
 			model = model.Order(parsedTagOutput.Order)
 		}
 
-		err = model.Fields(fieldKeys).Where(relatedFieldName, relatedFieldValue).Scan(bindToReflectValue)
+		err = model.Fields(fieldKeys).Where(relatedSourceName, relatedTargetValue).Scan(bindToReflectValue)
 		if err != nil {
 			return err
 		}
@@ -173,13 +176,17 @@ func (m *Model) doWithScanStructs(pointer interface{}) error {
 		err                 error
 		allowedTypeStrArray = make([]string, 0)
 	)
-	fieldMap, err := structs.FieldMap(pointer, nil, false)
+	currentStructFieldMap, err := structs.FieldMap(structs.FieldMapInput{
+		Pointer:          pointer,
+		PriorityTagArray: nil,
+		RecursiveOption:  structs.RecursiveOptionEmbeddedNoTag,
+	})
 	if err != nil {
 		return err
 	}
 	// It checks the with array and automatically calls the ScanList to complete association querying.
 	if !m.withAll {
-		for _, field := range fieldMap {
+		for _, field := range currentStructFieldMap {
 			for _, withItem := range m.withArray {
 				withItemReflectValueType, err := structs.StructType(withItem)
 				if err != nil {
@@ -197,7 +204,7 @@ func (m *Model) doWithScanStructs(pointer interface{}) error {
 		}
 	}
 
-	for fieldName, field := range fieldMap {
+	for fieldName, field := range currentStructFieldMap {
 		var (
 			fieldTypeStr    = gstr.TrimAll(field.Type().String(), "*[]")
 			parsedTagOutput = m.parseWithTagInFieldStruct(field)
@@ -215,24 +222,24 @@ func (m *Model) doWithScanStructs(pointer interface{}) error {
 			array = append(array, parsedTagOutput.With)
 		}
 		var (
-			model             *Model
-			fieldKeys         []string
-			relatedFieldName  = array[0]
-			relatedAttrName   = array[1]
-			relatedFieldValue interface{}
+			model              *Model
+			fieldKeys          []string
+			relatedSourceName  = array[0]
+			relatedTargetName  = array[1]
+			relatedTargetValue interface{}
 		)
 		// Find the value slice of related attribute from `pointer`.
-		for attributeName, _ := range fieldMap {
-			if utils.EqualFoldWithoutChars(attributeName, relatedAttrName) {
-				relatedFieldValue = ListItemValuesUnique(pointer, attributeName)
+		for attributeName, _ := range currentStructFieldMap {
+			if utils.EqualFoldWithoutChars(attributeName, relatedTargetName) {
+				relatedTargetValue = ListItemValuesUnique(pointer, attributeName)
 				break
 			}
 		}
-		if relatedFieldValue == nil {
+		if relatedTargetValue == nil {
 			return gerror.NewCodef(
-				gerror.CodeInvalidParameter,
+				gcode.CodeInvalidParameter,
 				`cannot find the related value for attribute name "%s" of with tag "%s"`,
-				relatedAttrName, parsedTagOutput.With,
+				relatedTargetName, parsedTagOutput.With,
 			)
 		}
 
@@ -257,7 +264,9 @@ func (m *Model) doWithScanStructs(pointer interface{}) error {
 			model = model.Order(parsedTagOutput.Order)
 		}
 
-		err = model.Fields(fieldKeys).Where(relatedFieldName, relatedFieldValue).ScanList(pointer, fieldName, parsedTagOutput.With)
+		err = model.Fields(fieldKeys).
+			Where(relatedSourceName, relatedTargetValue).
+			ScanList(pointer, fieldName, parsedTagOutput.With)
 		if err != nil {
 			return err
 		}
