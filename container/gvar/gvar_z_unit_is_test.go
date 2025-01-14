@@ -7,9 +7,11 @@
 package gvar_test
 
 import (
-	"github.com/gogf/gf/frame/g"
-	"github.com/gogf/gf/test/gtest"
 	"testing"
+
+	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/test/gtest"
 )
 
 func TestVar_IsNil(t *testing.T) {
@@ -142,6 +144,10 @@ func TestVar_IsMap(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		t.Assert(g.NewVar(int8(1)).IsMap(), false)
 		t.Assert(g.NewVar(uint8(1)).IsMap(), false)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		t.Assert(gvar.New(gvar.New("asd")).IsMap(), false)
+		t.Assert(gvar.New(&g.Map{"k": "v"}).IsMap(), true)
 	})
 }
 

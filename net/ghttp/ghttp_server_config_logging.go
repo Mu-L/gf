@@ -6,7 +6,7 @@
 
 package ghttp
 
-import "github.com/gogf/gf/os/glog"
+import "github.com/gogf/gf/v2/os/glog"
 
 // SetLogPath sets the log path for server.
 // It logs content to file only if the log path is set.
@@ -68,10 +68,10 @@ func (s *Server) GetLogPath() string {
 
 // IsAccessLogEnabled checks whether the access log enabled.
 func (s *Server) IsAccessLogEnabled() bool {
-	return s.config.AccessLogEnabled
+	return s.config.AccessLogEnabled && s.config.Logger != nil
 }
 
 // IsErrorLogEnabled checks whether the error log enabled.
 func (s *Server) IsErrorLogEnabled() bool {
-	return s.config.ErrorLogEnabled
+	return s.config.ErrorLogEnabled && s.config.Logger != nil
 }

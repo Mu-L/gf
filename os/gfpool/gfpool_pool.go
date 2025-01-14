@@ -10,9 +10,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/gogf/gf/container/gpool"
-	"github.com/gogf/gf/container/gtype"
-	"github.com/gogf/gf/os/gfsnotify"
+	"github.com/gogf/gf/v2/container/gpool"
+	"github.com/gogf/gf/v2/container/gtype"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gfsnotify"
 )
 
 // New creates and returns a file pointer pool with given file path, flag and opening permission.
@@ -41,6 +42,7 @@ func newFilePool(p *Pool, path string, flag int, perm os.FileMode, ttl time.Dura
 	pool := gpool.New(ttl, func() (interface{}, error) {
 		file, err := os.OpenFile(path, flag, perm)
 		if err != nil {
+			err = gerror.Wrapf(err, `os.OpenFile failed for file "%s", flag "%d", perm "%s"`, path, flag, perm)
 			return nil, err
 		}
 		return &File{
@@ -60,12 +62,11 @@ func newFilePool(p *Pool, path string, flag int, perm os.FileMode, ttl time.Dura
 // File retrieves file item from the file pointer pool and returns it. It creates one if
 // the file pointer pool is empty.
 // Note that it should be closed when it will never be used. When it's closed, it is not
-// really closed the underlying file pointer but put back to the file pinter pool.
+// really closed the underlying file pointer but put back to the file pointer pool.
 func (p *Pool) File() (*File, error) {
 	if v, err := p.pool.Get(); err != nil {
 		return nil, err
 	} else {
-		var err error
 		f := v.(*File)
 		f.stat, err = os.Stat(f.path)
 		if f.flag&os.O_CREATE > 0 {
@@ -98,8 +99,8 @@ func (p *Pool) File() (*File, error) {
 		}
 		// It firstly checks using !p.init.Val() for performance purpose.
 		if !p.init.Val() && p.init.Cas(false, true) {
-			_, _ = gfsnotify.Add(f.path, func(event *gfsnotify.Event) {
-				// If teh file is removed or renamed, recreates the pool by increasing the pool id.
+			var watchCallback = func(event *gfsnotify.Event) {
+				// If the file is removed or renamed, recreates the pool by increasing the pool id.
 				if event.IsRemove() || event.IsRename() {
 					// It drops the old pool.
 					p.id.Add(1)
@@ -109,7 +110,8 @@ func (p *Pool) File() (*File, error) {
 					// Whenever the pool id changes, the pool will be recreated.
 					p.id.Add(1)
 				}
-			}, false)
+			}
+			_, _ = gfsnotify.Add(f.path, watchCallback, gfsnotify.WatchOption{NoRecursive: true})
 		}
 		return f, nil
 	}

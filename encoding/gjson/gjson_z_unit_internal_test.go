@@ -7,8 +7,9 @@
 package gjson
 
 import (
-	"github.com/gogf/gf/test/gtest"
 	"testing"
+
+	"github.com/gogf/gf/v2/test/gtest"
 )
 
 func Test_checkDataType(t *testing.T) {
@@ -17,7 +18,9 @@ func Test_checkDataType(t *testing.T) {
 bb           = """
                    dig := dig;                         END;"""
 `)
-		t.Assert(checkDataType(data), "toml")
+		dataType, err := checkDataType(data)
+		t.AssertNil(err)
+		t.Assert(dataType, "toml")
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -31,7 +34,9 @@ dd = 11
     disk  = "127.0.0.1:6379,0"
     cache = "127.0.0.1:6379,1"
 `)
-		t.Assert(checkDataType(data), "toml")
+		dataType, err := checkDataType(data)
+		t.AssertNil(err)
+		t.Assert(dataType, "toml")
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -80,12 +85,14 @@ dd = 11
 "gf.gvalid.rule.not-in"               = "The :attribute value is not in acceptable range"
 "gf.gvalid.rule.regex"                = "The :attribute value is invalid"
 `)
-		//fmt.Println(gregex.IsMatch(`^[\s\t\n\r]*[\w\-]+\s*:\s*".+"`, data))
-		//fmt.Println(gregex.IsMatch(`^[\s\t\n\r]*[\w\-]+\s*:\s*\w+`, data))
-		//fmt.Println(gregex.IsMatch(`[\s\t\n\r]+[\w\-]+\s*:\s*".+"`, data))
-		//fmt.Println(gregex.IsMatch(`[\n\r]+[\w\-\s\t]+\s*:\s*\w+`, data))
-		//fmt.Println(gregex.MatchString(`[\n\r]+[\w\-\s\t]+\s*:\s*\w+`, string(data)))
-		t.Assert(checkDataType(data), "toml")
+		// fmt.Println(gregex.IsMatch(`^[\s\t\n\r]*[\w\-]+\s*:\s*".+"`, data))
+		// fmt.Println(gregex.IsMatch(`^[\s\t\n\r]*[\w\-]+\s*:\s*\w+`, data))
+		// fmt.Println(gregex.IsMatch(`[\s\t\n\r]+[\w\-]+\s*:\s*".+"`, data))
+		// fmt.Println(gregex.IsMatch(`[\n\r]+[\w\-\s\t]+\s*:\s*\w+`, data))
+		// fmt.Println(gregex.MatchString(`[\n\r]+[\w\-\s\t]+\s*:\s*\w+`, string(data)))
+		dataType, err := checkDataType(data)
+		t.AssertNil(err)
+		t.Assert(dataType, "toml")
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -110,7 +117,9 @@ k8s-inner-api = http://127.0.0.1:8081/kube/add
 conf_dir = ./config
 app_conf = ./config/app.ini
 `)
-		t.Assert(checkDataType(data), "ini")
+		dataType, err := checkDataType(data)
+		t.AssertNil(err)
+		t.Assert(dataType, "ini")
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -128,6 +137,8 @@ wget http://consul.infra:8500/v1/kv/app_{{.SwimlaneName}}/{{.RepoName}}/.env.qa?
 npm run build:qa
 """
 `)
-		t.Assert(checkDataType(data), "toml")
+		dataType, err := checkDataType(data)
+		t.AssertNil(err)
+		t.Assert(dataType, "toml")
 	})
 }

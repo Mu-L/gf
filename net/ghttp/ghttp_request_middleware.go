@@ -7,11 +7,12 @@
 package ghttp
 
 import (
-	"github.com/gogf/gf/errors/gerror"
+	"context"
 	"net/http"
-	"reflect"
 
-	"github.com/gogf/gf/util/gutil"
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/util/gutil"
 )
 
 // middleware is the plugin for request workflow management.
@@ -25,16 +26,16 @@ type middleware struct {
 // Next calls the next workflow handler.
 // It's an important function controlling the workflow of the server request execution.
 func (m *middleware) Next() {
-	var item *handlerParsedItem
+	var item *HandlerItemParsed
 	var loop = true
 	for loop {
-		// Check whether the request is exited.
+		// Check whether the request is excited.
 		if m.request.IsExited() || m.handlerIndex >= len(m.request.handlers) {
 			break
 		}
 		item = m.request.handlers[m.handlerIndex]
 		// Filter the HOOK handlers, which are designed to be called in another standalone procedure.
-		if item.Handler.Type == handlerTypeHook {
+		if item.Handler.Type == HandlerTypeHook {
 			m.handlerIndex++
 			continue
 		}
@@ -44,7 +45,8 @@ func (m *middleware) Next() {
 		// Router values switching.
 		m.request.routerMap = item.Values
 
-		gutil.TryCatch(func() {
+		var ctx = m.request.Context()
+		gutil.TryCatch(ctx, func(ctx context.Context) {
 			// Execute bound middleware array of the item if it's not empty.
 			if m.handlerMDIndex < len(item.Handler.Middleware) {
 				md := item.Handler.Middleware[m.handlerMDIndex]
@@ -59,7 +61,7 @@ func (m *middleware) Next() {
 
 			switch item.Handler.Type {
 			// Service object.
-			case handlerTypeObject:
+			case HandlerTypeObject:
 				m.served = true
 				if m.request.IsExited() {
 					break
@@ -79,7 +81,7 @@ func (m *middleware) Next() {
 				}
 
 			// Service handler.
-			case handlerTypeHandler:
+			case HandlerTypeHandler:
 				m.served = true
 				if m.request.IsExited() {
 					break
@@ -89,7 +91,7 @@ func (m *middleware) Next() {
 				})
 
 			// Global middleware array.
-			case handlerTypeMiddleware:
+			case HandlerTypeMiddleware:
 				niceCallFunc(func() {
 					item.Handler.Info.Func(m.request)
 				})
@@ -97,21 +99,21 @@ func (m *middleware) Next() {
 				// There should be a "Next" function to be called in the middleware in order to manage the workflow.
 				loop = false
 			}
-		}, func(exception error) {
-			if e, ok := exception.(errorStack); ok {
+		}, func(ctx context.Context, exception error) {
+			if gerror.HasStack(exception) {
 				// It's already an error that has stack info.
-				m.request.error = e
+				m.request.error = exception
 			} else {
 				// Create a new error with stack info.
 				// Note that there's a skip pointing the start stacktrace
 				// of the real error point.
-				m.request.error = gerror.WrapCodeSkip(gerror.CodeInternalError, 1, exception, "")
+				m.request.error = gerror.WrapCodeSkip(gcode.CodeInternalError, 1, exception, "")
 			}
 			m.request.Response.WriteStatus(http.StatusInternalServerError, exception)
 			loop = false
 		})
 	}
-	// Check the http status code after all handler and middleware done.
+	// Check the http status code after all handlers and middleware done.
 	if m.request.IsExited() || m.handlerIndex >= len(m.request.handlers) {
 		if m.request.Response.Status == 0 {
 			if m.request.Middleware.served {
@@ -125,43 +127,6 @@ func (m *middleware) Next() {
 
 func (m *middleware) callHandlerFunc(funcInfo handlerFuncInfo) {
 	niceCallFunc(func() {
-		if funcInfo.Func != nil {
-			funcInfo.Func(m.request)
-		} else {
-			var inputValues = []reflect.Value{
-				reflect.ValueOf(m.request.Context()),
-			}
-			if funcInfo.Type.NumIn() == 2 {
-				var (
-					request reflect.Value
-				)
-				if funcInfo.Type.In(1).Kind() == reflect.Ptr {
-					request = reflect.New(funcInfo.Type.In(1).Elem())
-					m.request.handlerResponse.Error = m.request.Parse(request.Interface())
-				} else {
-					request = reflect.New(funcInfo.Type.In(1).Elem()).Elem()
-					m.request.handlerResponse.Error = m.request.Parse(request.Addr().Interface())
-				}
-				if m.request.handlerResponse.Error != nil {
-					return
-				}
-				inputValues = append(inputValues, request)
-			}
-
-			// Call handler with dynamic created parameter values.
-			results := funcInfo.Value.Call(inputValues)
-			switch len(results) {
-			case 1:
-				m.request.handlerResponse.Error = results[0].Interface().(error)
-
-			case 2:
-				m.request.handlerResponse.Object = results[0].Interface()
-				if !results[1].IsNil() {
-					if v := results[1].Interface(); v != nil {
-						m.request.handlerResponse.Error = v.(error)
-					}
-				}
-			}
-		}
+		funcInfo.Func(m.request)
 	})
 }
