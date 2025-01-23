@@ -4,57 +4,38 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
+//go:build !windows
 // +build !windows
 
 package ghttp
 
 import (
 	"context"
-	"github.com/gogf/gf/internal/intlog"
 	"os"
-	"os/signal"
 	"syscall"
+
+	"github.com/gogf/gf/v2/internal/intlog"
+	"github.com/gogf/gf/v2/os/glog"
+	"github.com/gogf/gf/v2/os/gproc"
 )
 
-// procSignalChan is the channel for listening the signal.
-var procSignalChan = make(chan os.Signal)
-
-// handleProcessSignal handles all signal from system.
+// handleProcessSignal handles all signals from system in blocking way.
 func handleProcessSignal() {
-	var sig os.Signal
-	signal.Notify(
-		procSignalChan,
-		syscall.SIGINT,
-		syscall.SIGQUIT,
-		syscall.SIGKILL,
-		syscall.SIGTERM,
-		syscall.SIGABRT,
-		syscall.SIGUSR1,
-		syscall.SIGUSR2,
-	)
-	for {
-		sig = <-procSignalChan
-		intlog.Printf(context.TODO(), `signal received: %s`, sig.String())
-		switch sig {
-		// Shutdown the servers.
-		case syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGABRT:
-			shutdownWebServers(sig.String())
+	var ctx = context.TODO()
+	gproc.AddSigHandlerShutdown(func(sig os.Signal) {
+		shutdownWebServersGracefully(ctx, sig)
+	})
+	gproc.AddSigHandler(func(sig os.Signal) {
+		// If the graceful restart feature is not enabled,
+		// it does nothing except printing a warning log.
+		if !gracefulEnabled {
+			glog.Warning(ctx, "graceful reload feature is disabled")
 			return
-
-		// Shutdown the servers gracefully.
-		// Especially from K8S when running server in POD.
-		case syscall.SIGTERM:
-			shutdownWebServersGracefully(sig.String())
-			return
-
-		// Restart the servers.
-		case syscall.SIGUSR1:
-			if err := restartWebServers(sig.String()); err != nil {
-				intlog.Error(context.TODO(), err)
-			}
-			return
-
-		default:
 		}
-	}
+		if err := restartWebServers(ctx, sig, ""); err != nil {
+			intlog.Errorf(ctx, `%+v`, err)
+		}
+	}, syscall.SIGUSR1)
+
+	gproc.Listen()
 }

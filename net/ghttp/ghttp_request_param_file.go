@@ -8,35 +8,43 @@ package ghttp
 
 import (
 	"context"
-	"github.com/gogf/gf/errors/gerror"
-	"github.com/gogf/gf/internal/intlog"
-	"github.com/gogf/gf/os/gfile"
-	"github.com/gogf/gf/os/gtime"
-	"github.com/gogf/gf/util/grand"
 	"io"
 	"mime/multipart"
 	"strconv"
 	"strings"
+
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/intlog"
+	"github.com/gogf/gf/v2/internal/json"
+	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/grand"
 )
 
 // UploadFile wraps the multipart uploading file with more and convenient features.
 type UploadFile struct {
-	*multipart.FileHeader
-	ctx context.Context
+	*multipart.FileHeader `json:"-"`
+	ctx                   context.Context
 }
 
-// UploadFiles is array type for *UploadFile.
+// MarshalJSON implements the interface MarshalJSON for json.Marshal.
+func (f UploadFile) MarshalJSON() ([]byte, error) {
+	return json.Marshal(f.FileHeader)
+}
+
+// UploadFiles is an array type of *UploadFile.
 type UploadFiles []*UploadFile
 
 // Save saves the single uploading file to directory path and returns the saved file name.
 //
-// The parameter <dirPath> should be a directory path or it returns error.
+// The parameter `dirPath` should be a directory path, or it returns error.
 //
 // Note that it will OVERWRITE the target file if there's already a same name file exist.
 func (f *UploadFile) Save(dirPath string, randomlyRename ...bool) (filename string, err error) {
 	if f == nil {
 		return "", gerror.NewCode(
-			gerror.CodeMissingParameter,
+			gcode.CodeMissingParameter,
 			"file is empty, maybe you retrieve it from invalid field name or form enctype",
 		)
 	}
@@ -45,11 +53,12 @@ func (f *UploadFile) Save(dirPath string, randomlyRename ...bool) (filename stri
 			return
 		}
 	} else if !gfile.IsDir(dirPath) {
-		return "", gerror.NewCode(gerror.CodeInvalidParameter, `parameter "dirPath" should be a directory path`)
+		return "", gerror.NewCode(gcode.CodeInvalidParameter, `parameter "dirPath" should be a directory path`)
 	}
 
 	file, err := f.Open()
 	if err != nil {
+		err = gerror.Wrapf(err, `UploadFile.Open failed`)
 		return "", err
 	}
 	defer file.Close()
@@ -66,7 +75,8 @@ func (f *UploadFile) Save(dirPath string, randomlyRename ...bool) (filename stri
 	}
 	defer newFile.Close()
 	intlog.Printf(f.ctx, `save upload file: %s`, filePath)
-	if _, err := io.Copy(newFile, file); err != nil {
+	if _, err = io.Copy(newFile, file); err != nil {
+		err = gerror.Wrapf(err, `io.Copy failed from "%s" to "%s"`, f.Filename, filePath)
 		return "", err
 	}
 	return gfile.Basename(filePath), nil
@@ -74,13 +84,13 @@ func (f *UploadFile) Save(dirPath string, randomlyRename ...bool) (filename stri
 
 // Save saves all uploading files to specified directory path and returns the saved file names.
 //
-// The parameter <dirPath> should be a directory path or it returns error.
+// The parameter `dirPath` should be a directory path or it returns error.
 //
-// The parameter <randomlyRename> specifies whether randomly renames all the file names.
+// The parameter `randomlyRename` specifies whether randomly renames all the file names.
 func (fs UploadFiles) Save(dirPath string, randomlyRename ...bool) (filenames []string, err error) {
 	if len(fs) == 0 {
 		return nil, gerror.NewCode(
-			gerror.CodeMissingParameter,
+			gcode.CodeMissingParameter,
 			"file array is empty, maybe you retrieve it from invalid field name or form enctype",
 		)
 	}
@@ -100,7 +110,7 @@ func (fs UploadFiles) Save(dirPath string, randomlyRename ...bool) (filenames []
 //
 // It returns nil if retrieving failed or no form file with given name posted.
 //
-// Note that the <name> is the file field name of the multipart form from client.
+// Note that the `name` is the file field name of the multipart form from client.
 func (r *Request) GetUploadFile(name string) *UploadFile {
 	uploadFiles := r.GetUploadFiles(name)
 	if len(uploadFiles) > 0 {
@@ -115,7 +125,7 @@ func (r *Request) GetUploadFile(name string) *UploadFile {
 //
 // It returns nil if retrieving failed or no form file with given name posted.
 //
-// Note that the <name> is the file field name of the multipart form from client.
+// Note that the `name` is the file field name of the multipart form from client.
 func (r *Request) GetUploadFiles(name string) UploadFiles {
 	multipartFiles := r.GetMultipartFiles(name)
 	if len(multipartFiles) > 0 {
