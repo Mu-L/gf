@@ -8,10 +8,11 @@
 package ghttp
 
 import (
-	"github.com/gogf/gf/text/gstr"
-	"github.com/gogf/gf/util/gconv"
 	"net/http"
 	"net/url"
+
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 // CORSOptions is the options for CORS feature.
@@ -28,7 +29,7 @@ type CORSOptions struct {
 
 var (
 	// defaultAllowHeaders is the default allowed headers for CORS.
-	// It's defined another map for better header key searching performance.
+	// It defined another map for better header key searching performance.
 	defaultAllowHeaders    = "Origin,Content-Type,Accept,User-Agent,Cookie,Authorization,X-Auth-Token,X-Requested-With"
 	defaultAllowHeadersMap = make(map[string]struct{})
 )
@@ -63,8 +64,8 @@ func (r *Response) DefaultCORSOptions() CORSOptions {
 	if origin := r.Request.Header.Get("Origin"); origin != "" {
 		options.AllowOrigin = origin
 	} else if referer := r.Request.Referer(); referer != "" {
-		if p := gstr.PosR(referer, "/", 6); p != -1 {
-			options.AllowOrigin = referer[:p]
+		if ref, err := url.Parse(referer); err == nil {
+			options.AllowOrigin = ref.Scheme + "://" + ref.Host
 		} else {
 			options.AllowOrigin = referer
 		}
@@ -105,7 +106,7 @@ func (r *Response) CORS(options CORSOptions) {
 	}
 }
 
-// CORSAllowed checks whether the current request origin is allowed cross-domain.
+// CORSAllowedOrigin CORSAllowed checks whether the current request origin is allowed cross-domain.
 func (r *Response) CORSAllowedOrigin(options CORSOptions) bool {
 	if options.AllowDomain == nil {
 		return true

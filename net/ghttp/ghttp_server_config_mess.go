@@ -26,3 +26,35 @@ func (s *Server) SetClientMaxBodySize(maxSize int64) {
 func (s *Server) SetFormParsingMemory(maxMemory int64) {
 	s.config.FormParsingMemory = maxMemory
 }
+
+// SetGraceful sets the Graceful for server.
+func (s *Server) SetGraceful(graceful bool) {
+	s.config.Graceful = graceful
+	// note: global setting.
+	gracefulEnabled = graceful
+}
+
+// GetGraceful returns the Graceful for server.
+func (s *Server) GetGraceful() bool {
+	return s.config.Graceful
+}
+
+// SetGracefulTimeout sets the GracefulTimeout for server.
+func (s *Server) SetGracefulTimeout(gracefulTimeout int) {
+	s.config.GracefulTimeout = gracefulTimeout
+}
+
+// GetGracefulTimeout returns the GracefulTimeout for server.
+func (s *Server) GetGracefulTimeout() int {
+	return s.config.GracefulTimeout
+}
+
+// SetGracefulShutdownTimeout sets the GracefulShutdownTimeout for server.
+func (s *Server) SetGracefulShutdownTimeout(gracefulShutdownTimeout int) {
+	s.config.GracefulShutdownTimeout = gracefulShutdownTimeout
+}
+
+// GetGracefulShutdownTimeout returns the GracefulShutdownTimeout for server.
+func (s *Server) GetGracefulShutdownTimeout() int {
+	return s.config.GracefulShutdownTimeout
+}

@@ -8,56 +8,20 @@
 package gutil
 
 import (
-	"fmt"
-	"github.com/gogf/gf/internal/empty"
-	"github.com/gogf/gf/util/gconv"
 	"reflect"
+
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
-// Throw throws out an exception, which can be caught be TryCatch or recover.
-func Throw(exception interface{}) {
-	panic(exception)
-}
+const (
+	dumpIndent = `    `
+)
 
-// Try implements try... logistics using internal panic...recover.
-// It returns error if any exception occurs, or else it returns nil.
-func Try(try func()) (err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = fmt.Errorf(`%v`, e)
-		}
-	}()
-	try()
-	return
-}
-
-// TryCatch implements try...catch... logistics using internal panic...recover.
-// It automatically calls function `catch` if any exception occurs ans passes the exception as an error.
-func TryCatch(try func(), catch ...func(exception error)) {
-	defer func() {
-		if exception := recover(); exception != nil && len(catch) > 0 {
-			if err, ok := exception.(error); ok {
-				catch[0](err)
-			} else {
-				catch[0](fmt.Errorf(`%v`, exception))
-			}
-		}
-	}()
-	try()
-}
-
-// IsEmpty checks given `value` empty or not.
-// It returns false if `value` is: integer(0), bool(false), slice/map(len=0), nil;
-// or else returns true.
-func IsEmpty(value interface{}) bool {
-	return empty.IsEmpty(value)
-}
-
-// Keys retrieves and returns the keys from given map or struct.
-func Keys(mapOrStruct interface{}) (keysOrAttrs []string) {
+// Keys retrieves and returns the keys from the given map or struct.
+func Keys(mapOrStruct any) (keysOrAttrs []string) {
 	keysOrAttrs = make([]string, 0)
-	if m, ok := mapOrStruct.(map[string]interface{}); ok {
-		for k, _ := range m {
+	if m, ok := mapOrStruct.(map[string]any); ok {
+		for k := range m {
 			keysOrAttrs = append(keysOrAttrs, k)
 		}
 		return
@@ -99,11 +63,12 @@ func Keys(mapOrStruct interface{}) (keysOrAttrs []string) {
 				keysOrAttrs = append(keysOrAttrs, fieldType.Name)
 			}
 		}
+	default:
 	}
 	return
 }
 
-// Values retrieves and returns the values from given map or struct.
+// Values retrieves and returns the values from the given map or struct.
 func Values(mapOrStruct interface{}) (values []interface{}) {
 	values = make([]interface{}, 0)
 	if m, ok := mapOrStruct.(map[string]interface{}); ok {
@@ -144,6 +109,7 @@ func Values(mapOrStruct interface{}) (values []interface{}) {
 				values = append(values, reflectValue.Field(i).Interface())
 			}
 		}
+	default:
 	}
 	return
 }

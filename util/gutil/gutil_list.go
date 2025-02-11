@@ -8,6 +8,8 @@ package gutil
 
 import (
 	"reflect"
+
+	"github.com/gogf/gf/v2/internal/utils"
 )
 
 // ListItemValues retrieves and returns the elements of all item struct/map with key `key`.
@@ -120,13 +122,24 @@ func ListItemValuesUnique(list interface{}, key string, subKey ...interface{}) [
 			m  = make(map[interface{}]struct{}, len(values))
 		)
 		for i := 0; i < len(values); {
-			if _, ok = m[values[i]]; ok {
+			value := values[i]
+			if t, ok := value.([]byte); ok {
+				// make byte slice comparable
+				value = string(t)
+			}
+			if _, ok = m[value]; ok {
 				values = SliceDelete(values, i)
 			} else {
-				m[values[i]] = struct{}{}
+				m[value] = struct{}{}
 				i++
 			}
 		}
 	}
 	return values
+}
+
+// ListToMapByKey converts `list` to a map[string]interface{} of which key is specified by `key`.
+// Note that the item value may be type of slice.
+func ListToMapByKey(list []map[string]interface{}, key string) map[string]interface{} {
+	return utils.ListToMapByKey(list, key)
 }
