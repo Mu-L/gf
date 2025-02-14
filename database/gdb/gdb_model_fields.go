@@ -8,85 +8,148 @@ package gdb
 
 import (
 	"fmt"
-	"github.com/gogf/gf/container/gset"
-	"github.com/gogf/gf/text/gstr"
-	"github.com/gogf/gf/util/gconv"
-	"github.com/gogf/gf/util/gutil"
+
+	"github.com/gogf/gf/v2/container/gset"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
-// Fields sets the operation fields of the model, multiple fields joined using char ','.
+// Fields appends `fieldNamesOrMapStruct` to the operation fields of the model, multiple fields joined using char ','.
 // The parameter `fieldNamesOrMapStruct` can be type of string/map/*map/struct/*struct.
+//
+// Example:
+// Fields("id", "name", "age")
+// Fields([]string{"id", "name", "age"})
+// Fields(map[string]interface{}{"id":1, "name":"john", "age":18})
+// Fields(User{Id: 1, Name: "john", Age: 18}).
 func (m *Model) Fields(fieldNamesOrMapStruct ...interface{}) *Model {
 	length := len(fieldNamesOrMapStruct)
 	if length == 0 {
 		return m
 	}
-	switch {
-	// String slice.
-	case length >= 2:
-		model := m.getModel()
-		model.fields = gstr.Join(m.mappingAndFilterToTableFields(gconv.Strings(fieldNamesOrMapStruct), true), ",")
-		return model
-	// It need type asserting.
-	case length == 1:
-		model := m.getModel()
-		switch r := fieldNamesOrMapStruct[0].(type) {
-		case string:
-			model.fields = gstr.Join(m.mappingAndFilterToTableFields([]string{r}, false), ",")
-		case []string:
-			model.fields = gstr.Join(m.mappingAndFilterToTableFields(r, true), ",")
-		default:
-			model.fields = gstr.Join(m.mappingAndFilterToTableFields(gutil.Keys(r), true), ",")
-		}
-		return model
+	fields := m.filterFieldsFrom(m.tablesInit, fieldNamesOrMapStruct...)
+	if len(fields) == 0 {
+		return m
 	}
-	return m
+	model := m.getModel()
+	return model.appendToFields(fields...)
 }
 
-// FieldsEx sets the excluded operation fields of the model, multiple fields joined using char ','.
+// FieldsPrefix performs as function Fields but add extra prefix for each field.
+func (m *Model) FieldsPrefix(prefixOrAlias string, fieldNamesOrMapStruct ...interface{}) *Model {
+	fields := m.filterFieldsFrom(
+		m.getTableNameByPrefixOrAlias(prefixOrAlias),
+		fieldNamesOrMapStruct...,
+	)
+	if len(fields) == 0 {
+		return m
+	}
+	for i, field := range fields {
+		fields[i] = prefixOrAlias + "." + gconv.String(field)
+	}
+	model := m.getModel()
+	return model.appendToFields(fields...)
+}
+
+// FieldsEx appends `fieldNamesOrMapStruct` to the excluded operation fields of the model,
+// multiple fields joined using char ','.
 // Note that this function supports only single table operations.
 // The parameter `fieldNamesOrMapStruct` can be type of string/map/*map/struct/*struct.
+//
+// Example:
+// FieldsEx("id", "name", "age")
+// FieldsEx([]string{"id", "name", "age"})
+// FieldsEx(map[string]interface{}{"id":1, "name":"john", "age":18})
+// FieldsEx(User{Id: 1, Name: "john", Age: 18}).
 func (m *Model) FieldsEx(fieldNamesOrMapStruct ...interface{}) *Model {
+	return m.doFieldsEx(m.tablesInit, fieldNamesOrMapStruct...)
+}
+
+func (m *Model) doFieldsEx(table string, fieldNamesOrMapStruct ...interface{}) *Model {
 	length := len(fieldNamesOrMapStruct)
 	if length == 0 {
 		return m
 	}
-	model := m.getModel()
-	switch {
-	case length >= 2:
-		model.fieldsEx = gstr.Join(m.mappingAndFilterToTableFields(gconv.Strings(fieldNamesOrMapStruct), true), ",")
-		return model
-	case length == 1:
-		switch r := fieldNamesOrMapStruct[0].(type) {
-		case string:
-			model.fieldsEx = gstr.Join(m.mappingAndFilterToTableFields([]string{r}, false), ",")
-		case []string:
-			model.fieldsEx = gstr.Join(m.mappingAndFilterToTableFields(r, true), ",")
-		default:
-			model.fieldsEx = gstr.Join(m.mappingAndFilterToTableFields(gutil.Keys(r), true), ",")
-		}
-		return model
-	}
-	return m
-}
-
-// Filter marks filtering the fields which does not exist in the fields of the operated table.
-// Note that this function supports only single table operations.
-// Deprecated, filter feature is automatically enabled from GoFrame v1.16.0, it is so no longer used.
-func (m *Model) Filter() *Model {
-	if gstr.Contains(m.tables, " ") {
-		panic("function Filter supports only single table operations")
+	fields := m.filterFieldsFrom(table, fieldNamesOrMapStruct...)
+	if len(fields) == 0 {
+		return m
 	}
 	model := m.getModel()
-	model.filter = true
+	model.fieldsEx = append(model.fieldsEx, fields...)
 	return model
 }
 
-// FieldsStr retrieves and returns all fields from the table, joined with char ','.
-// The optional parameter `prefix` specifies the prefix for each field, eg: FieldsStr("u.").
-// Deprecated, use GetFieldsStr instead.
-func (m *Model) FieldsStr(prefix ...string) string {
-	return m.GetFieldsStr(prefix...)
+// FieldsExPrefix performs as function FieldsEx but add extra prefix for each field.
+func (m *Model) FieldsExPrefix(prefixOrAlias string, fieldNamesOrMapStruct ...interface{}) *Model {
+	model := m.doFieldsEx(
+		m.getTableNameByPrefixOrAlias(prefixOrAlias),
+		fieldNamesOrMapStruct...,
+	)
+	for i, field := range model.fieldsEx {
+		model.fieldsEx[i] = prefixOrAlias + "." + gconv.String(field)
+	}
+	return model
+}
+
+// FieldCount formats and appends commonly used field `COUNT(column)` to the select fields of model.
+func (m *Model) FieldCount(column string, as ...string) *Model {
+	asStr := ""
+	if len(as) > 0 && as[0] != "" {
+		asStr = fmt.Sprintf(` AS %s`, m.db.GetCore().QuoteWord(as[0]))
+	}
+	model := m.getModel()
+	return model.appendToFields(
+		fmt.Sprintf(`COUNT(%s)%s`, m.QuoteWord(column), asStr),
+	)
+}
+
+// FieldSum formats and appends commonly used field `SUM(column)` to the select fields of model.
+func (m *Model) FieldSum(column string, as ...string) *Model {
+	asStr := ""
+	if len(as) > 0 && as[0] != "" {
+		asStr = fmt.Sprintf(` AS %s`, m.db.GetCore().QuoteWord(as[0]))
+	}
+	model := m.getModel()
+	return model.appendToFields(
+		fmt.Sprintf(`SUM(%s)%s`, m.QuoteWord(column), asStr),
+	)
+}
+
+// FieldMin formats and appends commonly used field `MIN(column)` to the select fields of model.
+func (m *Model) FieldMin(column string, as ...string) *Model {
+	asStr := ""
+	if len(as) > 0 && as[0] != "" {
+		asStr = fmt.Sprintf(` AS %s`, m.db.GetCore().QuoteWord(as[0]))
+	}
+	model := m.getModel()
+	return model.appendToFields(
+		fmt.Sprintf(`MIN(%s)%s`, m.QuoteWord(column), asStr),
+	)
+}
+
+// FieldMax formats and appends commonly used field `MAX(column)` to the select fields of model.
+func (m *Model) FieldMax(column string, as ...string) *Model {
+	asStr := ""
+	if len(as) > 0 && as[0] != "" {
+		asStr = fmt.Sprintf(` AS %s`, m.db.GetCore().QuoteWord(as[0]))
+	}
+	model := m.getModel()
+	return model.appendToFields(
+		fmt.Sprintf(`MAX(%s)%s`, m.QuoteWord(column), asStr),
+	)
+}
+
+// FieldAvg formats and appends commonly used field `AVG(column)` to the select fields of model.
+func (m *Model) FieldAvg(column string, as ...string) *Model {
+	asStr := ""
+	if len(as) > 0 && as[0] != "" {
+		asStr = fmt.Sprintf(` AS %s`, m.db.GetCore().QuoteWord(as[0]))
+	}
+	model := m.getModel()
+	return model.appendToFields(
+		fmt.Sprintf(`AVG(%s)%s`, m.QuoteWord(column), asStr),
+	)
 }
 
 // GetFieldsStr retrieves and returns all fields from the table, joined with char ','.
@@ -118,30 +181,21 @@ func (m *Model) GetFieldsStr(prefix ...string) string {
 	return newFields
 }
 
-// FieldsExStr retrieves and returns fields which are not in parameter `fields` from the table,
-// joined with char ','.
-// The parameter `fields` specifies the fields that are excluded.
-// The optional parameter `prefix` specifies the prefix for each field, eg: FieldsExStr("id", "u.").
-// Deprecated, use GetFieldsExStr instead.
-func (m *Model) FieldsExStr(fields string, prefix ...string) string {
-	return m.GetFieldsExStr(fields, prefix...)
-}
-
 // GetFieldsExStr retrieves and returns fields which are not in parameter `fields` from the table,
 // joined with char ','.
 // The parameter `fields` specifies the fields that are excluded.
 // The optional parameter `prefix` specifies the prefix for each field, eg: FieldsExStr("id", "u.").
-func (m *Model) GetFieldsExStr(fields string, prefix ...string) string {
+func (m *Model) GetFieldsExStr(fields string, prefix ...string) (string, error) {
 	prefixStr := ""
 	if len(prefix) > 0 {
 		prefixStr = prefix[0]
 	}
 	tableFields, err := m.TableFields(m.tablesInit)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	if len(tableFields) == 0 {
-		panic(fmt.Sprintf(`empty table fields for table "%s"`, m.tables))
+		return "", gerror.Newf(`empty table fields for table "%s"`, m.tables)
 	}
 	fieldsExSet := gset.NewStrSetFrom(gstr.SplitAndTrim(fields, ","))
 	fieldsArray := make([]string, len(tableFields))
@@ -159,26 +213,63 @@ func (m *Model) GetFieldsExStr(fields string, prefix ...string) string {
 		newFields += prefixStr + k
 	}
 	newFields = m.db.GetCore().QuoteString(newFields)
-	return newFields
+	return newFields, nil
 }
 
 // HasField determine whether the field exists in the table.
 func (m *Model) HasField(field string) (bool, error) {
-	tableFields, err := m.TableFields(m.tablesInit)
-	if err != nil {
-		return false, err
+	return m.db.GetCore().HasField(m.GetCtx(), m.tablesInit, field)
+}
+
+// getFieldsFrom retrieves, filters and returns fields name from table `table`.
+func (m *Model) filterFieldsFrom(table string, fieldNamesOrMapStruct ...any) []any {
+	length := len(fieldNamesOrMapStruct)
+	if length == 0 {
+		return nil
 	}
-	if len(tableFields) == 0 {
-		return false, fmt.Errorf(`empty table fields for table "%s"`, m.tables)
+	switch {
+	// String slice.
+	case length >= 2:
+		return m.mappingAndFilterToTableFields(
+			table, fieldNamesOrMapStruct, true,
+		)
+
+	// It needs type asserting.
+	case length == 1:
+		structOrMap := fieldNamesOrMapStruct[0]
+		switch r := structOrMap.(type) {
+		case string:
+			return m.mappingAndFilterToTableFields(table, []any{r}, false)
+
+		case []string:
+			return m.mappingAndFilterToTableFields(table, gconv.Interfaces(r), true)
+
+		case Raw, *Raw:
+			return []any{structOrMap}
+
+		default:
+			return m.mappingAndFilterToTableFields(table, getFieldsFromStructOrMap(structOrMap), true)
+		}
+
+	default:
+		return nil
 	}
-	fieldsArray := make([]string, len(tableFields))
-	for k, v := range tableFields {
-		fieldsArray[v.Index] = k
+}
+
+func (m *Model) appendToFields(fields ...any) *Model {
+	if len(fields) == 0 {
+		return m
 	}
-	for _, f := range fieldsArray {
-		if f == field {
-			return true, nil
+	model := m.getModel()
+	model.fields = append(model.fields, fields...)
+	return model
+}
+
+func (m *Model) isFieldInFieldsEx(field string) bool {
+	for _, v := range m.fieldsEx {
+		if v == field {
+			return true
 		}
 	}
-	return false, nil
+	return false
 }

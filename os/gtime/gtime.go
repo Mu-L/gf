@@ -10,20 +10,23 @@
 package gtime
 
 import (
+	"context"
 	"fmt"
-	"github.com/gogf/gf/errors/gerror"
-	"github.com/gogf/gf/internal/utils"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/text/gregex"
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/intlog"
+	"github.com/gogf/gf/v2/internal/utils"
+	"github.com/gogf/gf/v2/text/gregex"
 )
 
 const (
 	// Short writes for common usage durations.
+
 	D  = 24 * time.Hour
 	H  = time.Hour
 	M  = time.Minute
@@ -65,9 +68,9 @@ const (
 var (
 	// It's more high performance using regular expression
 	// than time.ParseInLocation to parse the datetime string.
-	timeRegex1, _ = regexp.Compile(timeRegexPattern1)
-	timeRegex2, _ = regexp.Compile(timeRegexPattern2)
-	timeRegex3, _ = regexp.Compile(timeRegexPattern3)
+	timeRegex1 = regexp.MustCompile(timeRegexPattern1)
+	timeRegex2 = regexp.MustCompile(timeRegexPattern2)
+	timeRegex3 = regexp.MustCompile(timeRegexPattern3)
 
 	// Month words to arabic numerals mapping.
 	monthMap = map[string]int{
@@ -97,20 +100,6 @@ var (
 		"december":  12,
 	}
 )
-
-// SetTimeZone sets the time zone for current whole process.
-// The parameter <zone> is an area string specifying corresponding time zone,
-// eg: Asia/Shanghai.
-//
-// This should be called before package "time" import.
-// Please refer to issue: https://github.com/golang/go/issues/34814
-func SetTimeZone(zone string) error {
-	location, err := time.LoadLocation(zone)
-	if err != nil {
-		return err
-	}
-	return os.Setenv("TZ", location.String())
-}
 
 // Timestamp retrieves and returns the timestamp in seconds.
 func Timestamp() int64 {
@@ -156,30 +145,6 @@ func TimestampNanoStr() string {
 	return Now().TimestampNanoStr()
 }
 
-// Second returns the timestamp in seconds.
-// Deprecated, use Timestamp instead.
-func Second() int64 {
-	return Timestamp()
-}
-
-// Millisecond returns the timestamp in milliseconds.
-// Deprecated, use TimestampMilli instead.
-func Millisecond() int64 {
-	return TimestampMilli()
-}
-
-// Microsecond returns the timestamp in microseconds.
-// Deprecated, use TimestampMicro instead.
-func Microsecond() int64 {
-	return TimestampMicro()
-}
-
-// Nanosecond returns the timestamp in nanoseconds.
-// Deprecated, use TimestampNano instead.
-func Nanosecond() int64 {
-	return TimestampNano()
-}
-
 // Date returns current date in string like "2006-01-02".
 func Date() string {
 	return time.Now().Format("2006-01-02")
@@ -195,7 +160,7 @@ func ISO8601() string {
 	return time.Now().Format("2006-01-02T15:04:05-07:00")
 }
 
-// ISO8601 returns current datetime in RFC822 format like "Mon, 02 Jan 06 15:04 MST".
+// RFC822 returns current datetime in RFC822 format like "Mon, 02 Jan 06 15:04 MST".
 func RFC822() string {
 	return time.Now().Format("Mon, 02 Jan 06 15:04 MST")
 }
@@ -231,11 +196,14 @@ func parseDateStr(s string) (year, month, day int) {
 }
 
 // StrToTime converts string to *Time object. It also supports timestamp string.
-// The parameter <format> is unnecessary, which specifies the format for converting like "Y-m-d H:i:s".
-// If <format> is given, it acts as same as function StrToTimeFormat.
-// If <format> is not given, it converts string as a "standard" datetime string.
-// Note that, it fails and returns error if there's no date string in <str>.
+// The parameter `format` is unnecessary, which specifies the format for converting like "Y-m-d H:i:s".
+// If `format` is given, it acts as same as function StrToTimeFormat.
+// If `format` is not given, it converts string as a "standard" datetime string.
+// Note that, it fails and returns error if there's no date string in `str`.
 func StrToTime(str string, format ...string) (*Time, error) {
+	if str == "" {
+		return &Time{wrapper{time.Time{}}}, nil
+	}
 	if len(format) > 0 {
 		return StrToTimeFormat(str, format[0])
 	}
@@ -250,20 +218,11 @@ func StrToTime(str string, format ...string) (*Time, error) {
 		local                = time.Local
 	)
 	if match = timeRegex1.FindStringSubmatch(str); len(match) > 0 && match[1] != "" {
-		//for k, v := range match {
-		//	match[k] = strings.TrimSpace(v)
-		//}
 		year, month, day = parseDateStr(match[1])
 	} else if match = timeRegex2.FindStringSubmatch(str); len(match) > 0 && match[1] != "" {
-		//for k, v := range match {
-		//	match[k] = strings.TrimSpace(v)
-		//}
 		year, month, day = parseDateStr(match[1])
 	} else if match = timeRegex3.FindStringSubmatch(str); len(match) > 0 && match[1] != "" {
-		//for k, v := range match {
-		//	match[k] = strings.TrimSpace(v)
-		//}
-		s := strings.Replace(match[2], ":", "", -1)
+		s := strings.ReplaceAll(match[2], ":", "")
 		if len(s) < 6 {
 			s += strings.Repeat("0", 6-len(s))
 		}
@@ -276,12 +235,12 @@ func StrToTime(str string, format ...string) (*Time, error) {
 		}
 		return NewFromTime(time.Date(0, time.Month(1), 1, hour, min, sec, nsec, local)), nil
 	} else {
-		return nil, gerror.NewCode(gerror.CodeInvalidParameter, "unsupported time format")
+		return nil, gerror.NewCodef(gcode.CodeInvalidParameter, `unsupported time converting for string "%s"`, str)
 	}
 
 	// Time
 	if len(match[2]) > 0 {
-		s := strings.Replace(match[2], ":", "", -1)
+		s := strings.ReplaceAll(match[2], ":", "")
 		if len(s) < 6 {
 			s += strings.Repeat("0", 6-len(s))
 		}
@@ -289,7 +248,7 @@ func StrToTime(str string, format ...string) (*Time, error) {
 		min, _ = strconv.Atoi(s[2:4])
 		sec, _ = strconv.Atoi(s[4:6])
 	}
-	// Nanoseconds, check and perform bit filling
+	// Nanoseconds, check and perform bits filling
 	if len(match[3]) > 0 {
 		nsec, _ = strconv.Atoi(match[3])
 		for i := 0; i < 9-len(match[3]); i++ {
@@ -303,7 +262,7 @@ func StrToTime(str string, format ...string) (*Time, error) {
 	}
 	// If there's offset in the string, it then firstly processes the offset.
 	if match[6] != "" {
-		zone := strings.Replace(match[6], ":", "", -1)
+		zone := strings.ReplaceAll(match[6], ":", "")
 		zone = strings.TrimLeft(zone, "+-")
 		if len(zone) <= 6 {
 			zone += strings.Repeat("0", 6-len(zone))
@@ -311,102 +270,99 @@ func StrToTime(str string, format ...string) (*Time, error) {
 			m, _ := strconv.Atoi(zone[2:4])
 			s, _ := strconv.Atoi(zone[4:6])
 			if h > 24 || m > 59 || s > 59 {
-				return nil, gerror.NewCodef(gerror.CodeInvalidParameter, "invalid zone string: %s", match[6])
+				return nil, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid zone string "%s"`, match[6])
+			}
+			operation := match[5]
+			if operation != "+" && operation != "-" {
+				operation = "-"
 			}
 			// Comparing the given time zone whether equals to current time zone,
-			// it converts it to UTC if they does not equal.
 			_, localOffset := time.Now().Zone()
+			zoneOffset := h*3600 + m*60 + s
+			if operation == "-" {
+				zoneOffset = -zoneOffset
+			}
 			// Comparing in seconds.
-			if (h*3600 + m*60 + s) != localOffset {
-				local = time.UTC
-				// UTC conversion.
-				operation := match[5]
-				if operation != "+" && operation != "-" {
-					operation = "-"
-				}
-				switch operation {
-				case "+":
-					if h > 0 {
-						hour -= h
-					}
-					if m > 0 {
-						min -= m
-					}
-					if s > 0 {
-						sec -= s
-					}
-				case "-":
-					if h > 0 {
-						hour += h
-					}
-					if m > 0 {
-						min += m
-					}
-					if s > 0 {
-						sec += s
-					}
-				}
+			if localOffset != zoneOffset {
+				local = time.FixedZone("", zoneOffset)
 			}
 		}
 	}
 	if month <= 0 || day <= 0 {
-		return nil, gerror.NewCodef(gerror.CodeInvalidParameter, "invalid time string:%s", str)
+		return nil, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid time string "%s"`, str)
 	}
 	return NewFromTime(time.Date(year, time.Month(month), day, hour, min, sec, nsec, local)), nil
 }
 
-// ConvertZone converts time in string <strTime> from <fromZone> to <toZone>.
-// The parameter <fromZone> is unnecessary, it is current time zone in default.
+// ConvertZone converts time in string `strTime` from `fromZone` to `toZone`.
+// The parameter `fromZone` is unnecessary, it is current time zone in default.
 func ConvertZone(strTime string, toZone string, fromZone ...string) (*Time, error) {
 	t, err := StrToTime(strTime)
 	if err != nil {
 		return nil, err
 	}
+	var l *time.Location
 	if len(fromZone) > 0 {
-		if l, err := time.LoadLocation(fromZone[0]); err != nil {
+		if l, err = time.LoadLocation(fromZone[0]); err != nil {
+			err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `time.LoadLocation failed for name "%s"`, fromZone[0])
 			return nil, err
 		} else {
 			t.Time = time.Date(t.Year(), time.Month(t.Month()), t.Day(), t.Hour(), t.Minute(), t.Time.Second(), t.Time.Nanosecond(), l)
 		}
 	}
-	if l, err := time.LoadLocation(toZone); err != nil {
+	if l, err = time.LoadLocation(toZone); err != nil {
+		err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `time.LoadLocation failed for name "%s"`, toZone)
 		return nil, err
 	} else {
 		return t.ToLocation(l), nil
 	}
 }
 
-// StrToTimeFormat parses string <str> to *Time object with given format <format>.
-// The parameter <format> is like "Y-m-d H:i:s".
+// StrToTimeFormat parses string `str` to *Time object with given format `format`.
+// The parameter `format` is like "Y-m-d H:i:s".
 func StrToTimeFormat(str string, format string) (*Time, error) {
 	return StrToTimeLayout(str, formatToStdLayout(format))
 }
 
-// StrToTimeLayout parses string <str> to *Time object with given format <layout>.
-// The parameter <layout> is in stdlib format like "2006-01-02 15:04:05".
+// StrToTimeLayout parses string `str` to *Time object with given format `layout`.
+// The parameter `layout` is in stdlib format like "2006-01-02 15:04:05".
 func StrToTimeLayout(str string, layout string) (*Time, error) {
 	if t, err := time.ParseInLocation(layout, str, time.Local); err == nil {
 		return NewFromTime(t), nil
 	} else {
-		return nil, err
+		return nil, gerror.WrapCodef(
+			gcode.CodeInvalidParameter, err,
+			`time.ParseInLocation failed for layout "%s" and value "%s"`,
+			layout, str,
+		)
 	}
 }
 
 // ParseTimeFromContent retrieves time information for content string, it then parses and returns it
 // as *Time object.
-// It returns the first time information if there're more than one time string in the content.
-// It only retrieves and parses the time information with given <format> if it's passed.
+// It returns the first time information if there are more than one time string in the content.
+// It only retrieves and parses the time information with given first matched `format` if it's passed.
 func ParseTimeFromContent(content string, format ...string) *Time {
+	var (
+		err   error
+		match []string
+	)
 	if len(format) > 0 {
-		if match, err := gregex.MatchString(formatToRegexPattern(format[0]), content); err == nil && len(match) > 0 {
-			return NewFromStrFormat(match[0], format[0])
+		for _, item := range format {
+			match, err = gregex.MatchString(formatToRegexPattern(item), content)
+			if err != nil {
+				intlog.Errorf(context.TODO(), `%+v`, err)
+			}
+			if len(match) > 0 {
+				return NewFromStrFormat(match[0], item)
+			}
 		}
 	} else {
-		if match := timeRegex1.FindStringSubmatch(content); len(match) >= 1 {
+		if match = timeRegex1.FindStringSubmatch(content); len(match) >= 1 {
 			return NewFromStr(strings.Trim(match[0], "./_- \n\r"))
-		} else if match := timeRegex2.FindStringSubmatch(content); len(match) >= 1 {
+		} else if match = timeRegex2.FindStringSubmatch(content); len(match) >= 1 {
 			return NewFromStr(strings.Trim(match[0], "./_- \n\r"))
-		} else if match := timeRegex3.FindStringSubmatch(content); len(match) >= 1 {
+		} else if match = timeRegex3.FindStringSubmatch(content); len(match) >= 1 {
 			return NewFromStr(strings.Trim(match[0], "./_- \n\r"))
 		}
 	}
@@ -420,33 +376,43 @@ func ParseTimeFromContent(content string, format ...string) *Time {
 // Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h", "d".
 //
 // Very note that it supports unit "d" more than function time.ParseDuration.
-func ParseDuration(s string) (time.Duration, error) {
+func ParseDuration(s string) (duration time.Duration, err error) {
+	var num int64
 	if utils.IsNumeric(s) {
-		v, err := strconv.ParseInt(s, 10, 64)
+		num, err = strconv.ParseInt(s, 10, 64)
 		if err != nil {
+			err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `strconv.ParseInt failed for string "%s"`, s)
 			return 0, err
 		}
-		return time.Duration(v), nil
+		return time.Duration(num), nil
 	}
 	match, err := gregex.MatchString(`^([\-\d]+)[dD](.*)$`, s)
 	if err != nil {
 		return 0, err
 	}
 	if len(match) == 3 {
-		v, err := strconv.ParseInt(match[1], 10, 64)
+		num, err = strconv.ParseInt(match[1], 10, 64)
 		if err != nil {
+			err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `strconv.ParseInt failed for string "%s"`, match[1])
 			return 0, err
 		}
-		return time.ParseDuration(fmt.Sprintf(`%dh%s`, v*24, match[2]))
+		s = fmt.Sprintf(`%dh%s`, num*24, match[2])
+		duration, err = time.ParseDuration(s)
+		if err != nil {
+			err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `time.ParseDuration failed for string "%s"`, s)
+		}
+		return
 	}
-	return time.ParseDuration(s)
+	duration, err = time.ParseDuration(s)
+	err = gerror.WrapCodef(gcode.CodeInvalidParameter, err, `time.ParseDuration failed for string "%s"`, s)
+	return
 }
 
-// FuncCost calculates the cost time of function <f> in nanoseconds.
-func FuncCost(f func()) int64 {
-	t := TimestampNano()
+// FuncCost calculates the cost time of function `f` in nanoseconds.
+func FuncCost(f func()) time.Duration {
+	t := time.Now()
 	f()
-	return TimestampNano() - t
+	return time.Since(t)
 }
 
 // isTimestampStr checks and returns whether given string a timestamp string.

@@ -7,35 +7,99 @@
 package gconv
 
 import (
-	"github.com/gogf/gf/errors/gerror"
 	"reflect"
+
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/json"
+	"github.com/gogf/gf/v2/util/gconv/internal/localinterface"
 )
 
-// Scan automatically calls MapToMap, MapToMaps, Struct or Structs function according to
-// the type of parameter `pointer` to implement the converting.
-// It calls function MapToMap if `pointer` is type of *map to do the converting.
-// It calls function MapToMaps if `pointer` is type of *[]map/*[]*map to do the converting.
-// It calls function Struct if `pointer` is type of *struct/**struct to do the converting.
-// It calls function Structs if `pointer` is type of *[]struct/*[]*struct to do the converting.
-func Scan(params interface{}, pointer interface{}, mapping ...map[string]string) (err error) {
-	var (
-		pointerType = reflect.TypeOf(pointer)
-		pointerKind = pointerType.Kind()
-	)
-	if pointerKind != reflect.Ptr {
-		return gerror.NewCodef(gerror.CodeInvalidParameter, "params should be type of pointer, but got: %v", pointerKind)
+// Scan automatically checks the type of `pointer` and converts `params` to `pointer`.
+// It supports `pointer` in type of `*map/*[]map/*[]*map/*struct/**struct/*[]struct/*[]*struct` for converting.
+//
+// TODO change `paramKeyToAttrMap` to `ScanOption` to be more scalable; add `DeepCopy` option for `ScanOption`.
+func Scan(srcValue interface{}, dstPointer interface{}, paramKeyToAttrMap ...map[string]string) (err error) {
+	if srcValue == nil {
+		// If `srcValue` is nil, no conversion.
+		return nil
 	}
+	if dstPointer == nil {
+		return gerror.NewCode(
+			gcode.CodeInvalidParameter,
+			`destination pointer should not be nil`,
+		)
+	}
+
+	// json converting check.
+	ok, err := doConvertWithJsonCheck(srcValue, dstPointer)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+
 	var (
-		pointerElem     = pointerType.Elem()
-		pointerElemKind = pointerElem.Kind()
+		dstPointerReflectType  reflect.Type
+		dstPointerReflectValue reflect.Value
 	)
-	switch pointerElemKind {
+	if v, ok := dstPointer.(reflect.Value); ok {
+		dstPointerReflectValue = v
+		dstPointerReflectType = v.Type()
+	} else {
+		dstPointerReflectValue = reflect.ValueOf(dstPointer)
+		// do not use dstPointerReflectValue.Type() as dstPointerReflectValue might be zero.
+		dstPointerReflectType = reflect.TypeOf(dstPointer)
+	}
+
+	// pointer kind validation.
+	var dstPointerReflectKind = dstPointerReflectType.Kind()
+	if dstPointerReflectKind != reflect.Ptr {
+		if dstPointerReflectValue.CanAddr() {
+			dstPointerReflectValue = dstPointerReflectValue.Addr()
+			dstPointerReflectType = dstPointerReflectValue.Type()
+			dstPointerReflectKind = dstPointerReflectType.Kind()
+		} else {
+			return gerror.NewCodef(
+				gcode.CodeInvalidParameter,
+				`destination pointer should be type of pointer, but got type: %v`,
+				dstPointerReflectType,
+			)
+		}
+	}
+	// direct assignment checks!
+	var srcValueReflectValue reflect.Value
+	if v, ok := srcValue.(reflect.Value); ok {
+		srcValueReflectValue = v
+	} else {
+		srcValueReflectValue = reflect.ValueOf(srcValue)
+	}
+	// if `srcValue` and `dstPointer` are the same type, the do directly assignment.
+	// For performance enhancement purpose.
+	var dstPointerReflectValueElem = dstPointerReflectValue.Elem()
+	// if `srcValue` and `dstPointer` are the same type, the do directly assignment.
+	// for performance enhancement purpose.
+	if ok = doConvertWithTypeCheck(srcValueReflectValue, dstPointerReflectValueElem); ok {
+		return nil
+	}
+
+	// do the converting.
+	var (
+		dstPointerReflectTypeElem     = dstPointerReflectType.Elem()
+		dstPointerReflectTypeElemKind = dstPointerReflectTypeElem.Kind()
+		keyToAttributeNameMapping     map[string]string
+	)
+	if len(paramKeyToAttrMap) > 0 {
+		keyToAttributeNameMapping = paramKeyToAttrMap[0]
+	}
+	switch dstPointerReflectTypeElemKind {
 	case reflect.Map:
-		return MapToMap(params, pointer, mapping...)
+		return doMapToMap(srcValue, dstPointer, paramKeyToAttrMap...)
 
 	case reflect.Array, reflect.Slice:
 		var (
-			sliceElem     = pointerElem.Elem()
+			sliceElem     = dstPointerReflectTypeElem.Elem()
 			sliceElemKind = sliceElem.Kind()
 		)
 		for sliceElemKind == reflect.Ptr {
@@ -43,29 +107,100 @@ func Scan(params interface{}, pointer interface{}, mapping ...map[string]string)
 			sliceElemKind = sliceElem.Kind()
 		}
 		if sliceElemKind == reflect.Map {
-			return MapToMaps(params, pointer, mapping...)
+			return doMapToMaps(srcValue, dstPointer, paramKeyToAttrMap...)
 		}
-		return Structs(params, pointer, mapping...)
+		return doStructs(srcValue, dstPointer, keyToAttributeNameMapping, "")
+
 	default:
-		return Struct(params, pointer, mapping...)
+		return doStruct(srcValue, dstPointer, keyToAttributeNameMapping, "")
 	}
 }
 
-// ScanDeep automatically calls StructDeep or StructsDeep function according to the type of
-// parameter `pointer` to implement the converting..
-// It calls function StructDeep if `pointer` is type of *struct/**struct to do the converting.
-// It calls function StructsDeep if `pointer` is type of *[]struct/*[]*struct to do the converting.
-// Deprecated, use Scan instead.
-func ScanDeep(params interface{}, pointer interface{}, mapping ...map[string]string) (err error) {
-	t := reflect.TypeOf(pointer)
-	k := t.Kind()
-	if k != reflect.Ptr {
-		return gerror.NewCodef(gerror.CodeInvalidParameter, "params should be type of pointer, but got: %v", k)
+func doConvertWithTypeCheck(srcValueReflectValue, dstPointerReflectValueElem reflect.Value) (ok bool) {
+	if !dstPointerReflectValueElem.IsValid() || !srcValueReflectValue.IsValid() {
+		return false
 	}
-	switch t.Elem().Kind() {
-	case reflect.Array, reflect.Slice:
-		return StructsDeep(params, pointer, mapping...)
+	switch {
+	// Example:
+	// UploadFile    => UploadFile
+	// []UploadFile  => []UploadFile
+	// *UploadFile   => *UploadFile
+	// *[]UploadFile => *[]UploadFile
+	// map           => map
+	// []map         => []map
+	// *[]map        => *[]map
+	case dstPointerReflectValueElem.Type() == srcValueReflectValue.Type():
+		dstPointerReflectValueElem.Set(srcValueReflectValue)
+		return true
+
+	// Example:
+	// UploadFile    => *UploadFile
+	// []UploadFile  => *[]UploadFile
+	// map           => *map
+	// []map         => *[]map
+	case dstPointerReflectValueElem.Kind() == reflect.Ptr &&
+		dstPointerReflectValueElem.Elem().IsValid() &&
+		dstPointerReflectValueElem.Elem().Type() == srcValueReflectValue.Type():
+		dstPointerReflectValueElem.Elem().Set(srcValueReflectValue)
+		return true
+
+	// Example:
+	// *UploadFile    => UploadFile
+	// *[]UploadFile  => []UploadFile
+	// *map           => map
+	// *[]map         => []map
+	case srcValueReflectValue.Kind() == reflect.Ptr &&
+		srcValueReflectValue.Elem().IsValid() &&
+		dstPointerReflectValueElem.Type() == srcValueReflectValue.Elem().Type():
+		dstPointerReflectValueElem.Set(srcValueReflectValue.Elem())
+		return true
+
 	default:
-		return StructDeep(params, pointer, mapping...)
+		return false
 	}
+}
+
+// doConvertWithJsonCheck does json converting check.
+// If given `params` is JSON, it then uses json.Unmarshal doing the converting.
+func doConvertWithJsonCheck(srcValue interface{}, dstPointer interface{}) (ok bool, err error) {
+	switch valueResult := srcValue.(type) {
+	case []byte:
+		if json.Valid(valueResult) {
+			if dstPointerReflectType, ok := dstPointer.(reflect.Value); ok {
+				if dstPointerReflectType.Kind() == reflect.Ptr {
+					if dstPointerReflectType.IsNil() {
+						return false, nil
+					}
+					return true, json.UnmarshalUseNumber(valueResult, dstPointerReflectType.Interface())
+				} else if dstPointerReflectType.CanAddr() {
+					return true, json.UnmarshalUseNumber(valueResult, dstPointerReflectType.Addr().Interface())
+				}
+			} else {
+				return true, json.UnmarshalUseNumber(valueResult, dstPointer)
+			}
+		}
+
+	case string:
+		if valueBytes := []byte(valueResult); json.Valid(valueBytes) {
+			if dstPointerReflectType, ok := dstPointer.(reflect.Value); ok {
+				if dstPointerReflectType.Kind() == reflect.Ptr {
+					if dstPointerReflectType.IsNil() {
+						return false, nil
+					}
+					return true, json.UnmarshalUseNumber(valueBytes, dstPointerReflectType.Interface())
+				} else if dstPointerReflectType.CanAddr() {
+					return true, json.UnmarshalUseNumber(valueBytes, dstPointerReflectType.Addr().Interface())
+				}
+			} else {
+				return true, json.UnmarshalUseNumber(valueBytes, dstPointer)
+			}
+		}
+
+	default:
+		// The `params` might be struct that implements interface function Interface, eg: gvar.Var.
+		if v, ok := srcValue.(localinterface.IInterface); ok {
+			return doConvertWithJsonCheck(v.Interface(), dstPointer)
+		}
+	}
+	return false, nil
 }

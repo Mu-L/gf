@@ -23,30 +23,100 @@ import (
 	"strings"
 )
 
+// CaseType is the type for Case.
+type CaseType string
+
+// The case type constants.
+const (
+	Camel           CaseType = "Camel"
+	CamelLower      CaseType = "CamelLower"
+	Snake           CaseType = "Snake"
+	SnakeFirstUpper CaseType = "SnakeFirstUpper"
+	SnakeScreaming  CaseType = "SnakeScreaming"
+	Kebab           CaseType = "Kebab"
+	KebabScreaming  CaseType = "KebabScreaming"
+	Lower           CaseType = "Lower"
+)
+
 var (
 	numberSequence      = regexp.MustCompile(`([a-zA-Z]{0,1})(\d+)([a-zA-Z]{0,1})`)
 	firstCamelCaseStart = regexp.MustCompile(`([A-Z]+)([A-Z]?[_a-z\d]+)|$`)
 	firstCamelCaseEnd   = regexp.MustCompile(`([\w\W]*?)([_]?[A-Z]+)$`)
 )
 
-// CamelCase converts a string to CamelCase.
-// Deprecated, use CaseCamel instead.
-func CamelCase(s string) string {
-	return CaseCamel(s)
+// CaseTypeMatch matches the case type from string.
+func CaseTypeMatch(caseStr string) CaseType {
+	caseTypes := []CaseType{
+		Camel,
+		CamelLower,
+		Snake,
+		SnakeFirstUpper,
+		SnakeScreaming,
+		Kebab,
+		KebabScreaming,
+		Lower,
+	}
+
+	for _, caseType := range caseTypes {
+		if Equal(caseStr, string(caseType)) {
+			return caseType
+		}
+	}
+
+	return CaseType(caseStr)
+}
+
+// CaseConvert converts a string to the specified naming convention.
+// Use CaseTypeMatch to match the case type from string.
+func CaseConvert(s string, caseType CaseType) string {
+	if s == "" || caseType == "" {
+		return s
+	}
+
+	switch caseType {
+	case Camel:
+		return CaseCamel(s)
+
+	case CamelLower:
+		return CaseCamelLower(s)
+
+	case Kebab:
+		return CaseKebab(s)
+
+	case KebabScreaming:
+		return CaseKebabScreaming(s)
+
+	case Snake:
+		return CaseSnake(s)
+
+	case SnakeFirstUpper:
+		return CaseSnakeFirstUpper(s)
+
+	case SnakeScreaming:
+		return CaseSnakeScreaming(s)
+
+	case Lower:
+		return ToLower(s)
+
+	default:
+		return s
+	}
 }
 
 // CaseCamel converts a string to CamelCase.
+//
+// Example:
+// CaseCamel("any_kind_of_string") -> AnyKindOfString
+// CaseCamel("anyKindOfString")    -> AnyKindOfString
 func CaseCamel(s string) string {
 	return toCamelInitCase(s, true)
 }
 
-// CamelLowerCase converts a string to lowerCamelCase.
-// Deprecated, use CaseCamelLower instead.
-func CamelLowerCase(s string) string {
-	return CaseCamelLower(s)
-}
-
 // CaseCamelLower converts a string to lowerCamelCase.
+//
+// Example:
+// CaseCamelLower("any_kind_of_string") -> anyKindOfString
+// CaseCamelLower("AnyKindOfString")    -> anyKindOfString
 func CaseCamelLower(s string) string {
 	if s == "" {
 		return s
@@ -57,37 +127,27 @@ func CaseCamelLower(s string) string {
 	return toCamelInitCase(s, false)
 }
 
-// SnakeCase converts a string to snake_case.
-// Deprecated, use CaseSnake instead.
-func SnakeCase(s string) string {
-	return CaseSnake(s)
-}
-
 // CaseSnake converts a string to snake_case.
+//
+// Example:
+// CaseSnake("AnyKindOfString") -> any_kind_of_string
 func CaseSnake(s string) string {
-	return DelimitedCase(s, '_')
-}
-
-// SnakeScreamingCase converts a string to SNAKE_CASE_SCREAMING.
-// Deprecated, use CaseSnakeScreaming instead.
-func SnakeScreamingCase(s string) string {
-	return CaseSnakeScreaming(s)
+	return CaseDelimited(s, '_')
 }
 
 // CaseSnakeScreaming converts a string to SNAKE_CASE_SCREAMING.
+//
+// Example:
+// CaseSnakeScreaming("AnyKindOfString") -> ANY_KIND_OF_STRING
 func CaseSnakeScreaming(s string) string {
 	return CaseDelimitedScreaming(s, '_', true)
 }
 
-// SnakeFirstUpperCase converts a string from RGBCodeMd5 to rgb_code_md5.
-// The length of word should not be too long
-// Deprecated, use CaseSnakeFirstUpper instead.
-func SnakeFirstUpperCase(word string, underscore ...string) string {
-	return CaseSnakeFirstUpper(word, underscore...)
-}
-
 // CaseSnakeFirstUpper converts a string like "RGBCodeMd5" to "rgb_code_md5".
 // TODO for efficiency should change regexp to traversing string in future.
+//
+// Example:
+// CaseSnakeFirstUpper("RGBCodeMd5") -> rgb_code_md5
 func CaseSnakeFirstUpper(word string, underscore ...string) string {
 	replace := "_"
 	if len(underscore) > 0 {
@@ -100,7 +160,7 @@ func CaseSnakeFirstUpper(word string, underscore ...string) string {
 	}
 
 	for {
-		m := firstCamelCaseStart.FindAllStringSubmatch(word, 1)
+		m = firstCamelCaseStart.FindAllStringSubmatch(word, 1)
 		if len(m) > 0 && m[0][1] != "" {
 			w := strings.ToLower(m[0][1])
 			w = w[:len(w)-1] + replace + string(w[len(w)-1])
@@ -114,46 +174,34 @@ func CaseSnakeFirstUpper(word string, underscore ...string) string {
 	return TrimLeft(word, replace)
 }
 
-// KebabCase converts a string to kebab-case.
-// Deprecated, use CaseKebab instead.
-func KebabCase(s string) string {
-	return CaseKebab(s)
-}
-
-// CaseKebab converts a string to kebab-case
+// CaseKebab converts a string to kebab-case.
+//
+// Example:
+// CaseKebab("AnyKindOfString") -> any-kind-of-string
 func CaseKebab(s string) string {
 	return CaseDelimited(s, '-')
 }
 
-// KebabScreamingCase converts a string to KEBAB-CASE-SCREAMING.
-// Deprecated, use CaseKebabScreaming instead.
-func KebabScreamingCase(s string) string {
-	return CaseKebabScreaming(s)
-}
-
 // CaseKebabScreaming converts a string to KEBAB-CASE-SCREAMING.
+//
+// Example:
+// CaseKebab("AnyKindOfString") -> ANY-KIND-OF-STRING
 func CaseKebabScreaming(s string) string {
 	return CaseDelimitedScreaming(s, '-', true)
 }
 
-// DelimitedCase converts a string to snake.case.delimited.
-// Deprecated, use CaseDelimited instead.
-func DelimitedCase(s string, del uint8) string {
-	return CaseDelimited(s, del)
-}
-
 // CaseDelimited converts a string to snake.case.delimited.
-func CaseDelimited(s string, del uint8) string {
+//
+// Example:
+// CaseDelimited("AnyKindOfString", '.') -> any.kind.of.string
+func CaseDelimited(s string, del byte) string {
 	return CaseDelimitedScreaming(s, del, false)
 }
 
-// DelimitedScreamingCase converts a string to DELIMITED.SCREAMING.CASE or delimited.screaming.case.
-// Deprecated, use CaseDelimitedScreaming instead.
-func DelimitedScreamingCase(s string, del uint8, screaming bool) string {
-	return CaseDelimitedScreaming(s, del, screaming)
-}
-
 // CaseDelimitedScreaming converts a string to DELIMITED.SCREAMING.CASE or delimited.screaming.case.
+//
+// Example:
+// CaseDelimitedScreaming("AnyKindOfString", '.') -> ANY.KIND.OF.STRING
 func CaseDelimitedScreaming(s string, del uint8, screaming bool) string {
 	s = addWordBoundariesToNumbers(s)
 	s = strings.Trim(s, " ")

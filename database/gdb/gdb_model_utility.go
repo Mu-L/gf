@@ -9,24 +9,44 @@ package gdb
 import (
 	"time"
 
-	"github.com/gogf/gf/container/gset"
-	"github.com/gogf/gf/internal/empty"
-	"github.com/gogf/gf/os/gtime"
-	"github.com/gogf/gf/text/gregex"
-	"github.com/gogf/gf/text/gstr"
-	"github.com/gogf/gf/util/gutil"
+	"github.com/gogf/gf/v2/container/gset"
+	"github.com/gogf/gf/v2/internal/empty"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gregex"
+	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
+	"github.com/gogf/gf/v2/util/gutil"
 )
 
-// TableFields retrieves and returns the fields information of specified table of current
+// QuoteWord checks given string `s` a word,
+// if true it quotes `s` with security chars of the database
+// and returns the quoted string; or else it returns `s` without any change.
+//
+// The meaning of a `word` can be considered as a column name.
+func (m *Model) QuoteWord(s string) string {
+	return m.db.GetCore().QuoteWord(s)
+}
+
+// TableFields retrieves and returns the fields' information of specified table of current
 // schema.
 //
 // Also see DriverMysql.TableFields.
 func (m *Model) TableFields(tableStr string, schema ...string) (fields map[string]*TableField, err error) {
-	useSchema := m.schema
-	if len(schema) > 0 && schema[0] != "" {
-		useSchema = schema[0]
+	var (
+		ctx        = m.GetCtx()
+		usedTable  = m.db.GetCore().guessPrimaryTableName(tableStr)
+		usedSchema = gutil.GetOrDefaultStr(m.schema, schema...)
+	)
+	// Sharding feature.
+	usedSchema, err = m.getActualSchema(ctx, usedSchema)
+	if err != nil {
+		return nil, err
 	}
-	return m.db.TableFields(m.GetCtx(), m.guessPrimaryTableName(tableStr), useSchema)
+	usedTable, err = m.getActualTable(ctx, usedTable)
+	if err != nil {
+		return nil, err
+	}
+	return m.db.TableFields(ctx, usedTable, usedSchema)
 }
 
 // getModel creates and returns a cloned model of current model if `safe` is true, or else it returns
@@ -42,36 +62,63 @@ func (m *Model) getModel() *Model {
 // mappingAndFilterToTableFields mappings and changes given field name to really table field name.
 // Eg:
 // ID        -> id
-// NICK_Name -> nickname
-func (m *Model) mappingAndFilterToTableFields(fields []string, filter bool) []string {
-	fieldsMap, err := m.TableFields(m.tablesInit)
-	if err != nil || len(fieldsMap) == 0 {
+// NICK_Name -> nickname.
+func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter bool) []any {
+	var fieldsTable = table
+	if fieldsTable != "" {
+		hasTable, _ := m.db.GetCore().HasTable(fieldsTable)
+		if !hasTable {
+			fieldsTable = m.tablesInit
+		}
+	}
+	if fieldsTable == "" {
+		fieldsTable = m.tablesInit
+	}
+
+	fieldsMap, _ := m.TableFields(fieldsTable)
+	if len(fieldsMap) == 0 {
 		return fields
 	}
-	var (
-		inputFieldsArray  = gstr.SplitAndTrim(gstr.Join(fields, ","), ",")
-		outputFieldsArray = make([]string, 0, len(inputFieldsArray))
-	)
+	var outputFieldsArray = make([]any, 0)
 	fieldsKeyMap := make(map[string]interface{}, len(fieldsMap))
-	for k, _ := range fieldsMap {
+	for k := range fieldsMap {
 		fieldsKeyMap[k] = nil
 	}
-	for _, field := range inputFieldsArray {
-		if _, ok := fieldsKeyMap[field]; !ok {
-			if !gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, field) {
-				// Eg: user.id, user.name
-				outputFieldsArray = append(outputFieldsArray, field)
+	for _, field := range fields {
+		var (
+			fieldStr         = gconv.String(field)
+			inputFieldsArray []string
+		)
+		switch {
+		case gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, fieldStr):
+			inputFieldsArray = append(inputFieldsArray, fieldStr)
+
+		case gregex.IsMatchString(regularFieldNameWithCommaRegPattern, fieldStr):
+			inputFieldsArray = gstr.SplitAndTrim(fieldStr, ",")
+
+		default:
+			// Example:
+			// user.id, user.name
+			// replace(concat_ws(',',lpad(s.id, 6, '0'),s.name),',','') `code`
+			outputFieldsArray = append(outputFieldsArray, field)
+			continue
+		}
+		for _, inputField := range inputFieldsArray {
+			if !gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, inputField) {
+				outputFieldsArray = append(outputFieldsArray, inputField)
 				continue
-			} else {
-				// Eg: id, name
-				if foundKey, _ := gutil.MapPossibleItemByKey(fieldsKeyMap, field); foundKey != "" {
+			}
+			if _, ok := fieldsKeyMap[inputField]; !ok {
+				// Example:
+				// id, name
+				if foundKey, _ := gutil.MapPossibleItemByKey(fieldsKeyMap, inputField); foundKey != "" {
 					outputFieldsArray = append(outputFieldsArray, foundKey)
 				} else if !filter {
-					outputFieldsArray = append(outputFieldsArray, field)
+					outputFieldsArray = append(outputFieldsArray, inputField)
 				}
+			} else {
+				outputFieldsArray = append(outputFieldsArray, inputField)
 			}
-		} else {
-			outputFieldsArray = append(outputFieldsArray, field)
 		}
 	}
 	return outputFieldsArray
@@ -83,8 +130,12 @@ func (m *Model) filterDataForInsertOrUpdate(data interface{}) (interface{}, erro
 	var err error
 	switch value := data.(type) {
 	case List:
+		var omitEmpty bool
+		if m.option&optionOmitNilDataList > 0 {
+			omitEmpty = true
+		}
 		for k, item := range value {
-			value[k], err = m.doMappingAndFilterForInsertOrUpdateDataMap(item, false)
+			value[k], err = m.doMappingAndFilterForInsertOrUpdateDataMap(item, omitEmpty)
 			if err != nil {
 				return nil, err
 			}
@@ -102,13 +153,40 @@ func (m *Model) filterDataForInsertOrUpdate(data interface{}) (interface{}, erro
 // doMappingAndFilterForInsertOrUpdateDataMap does the filter features for map.
 // Note that, it does not filter list item, which is also type of map, for "omit empty" feature.
 func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEmpty bool) (Map, error) {
-	var err error
-	data, err = m.db.GetCore().mappingAndFilterData(
-		m.schema, m.guessPrimaryTableName(m.tablesInit), data, m.filter,
+	var (
+		err    error
+		ctx    = m.GetCtx()
+		core   = m.db.GetCore()
+		schema = m.schema
+		table  = m.tablesInit
+	)
+	// Sharding feature.
+	schema, err = m.getActualSchema(ctx, schema)
+	if err != nil {
+		return nil, err
+	}
+	table, err = m.getActualTable(ctx, table)
+	if err != nil {
+		return nil, err
+	}
+	data, err = core.mappingAndFilterData(
+		ctx, schema, table, data, m.filter,
 	)
 	if err != nil {
 		return nil, err
 	}
+	// Remove key-value pairs of which the value is nil.
+	if allowOmitEmpty && m.option&optionOmitNilData > 0 {
+		tempMap := make(Map, len(data))
+		for k, v := range data {
+			if empty.IsNil(v) {
+				continue
+			}
+			tempMap[k] = v
+		}
+		data = tempMap
+	}
+
 	// Remove key-value pairs of which the value is empty.
 	if allowOmitEmpty && m.option&optionOmitEmptyData > 0 {
 		tempMap := make(Map, len(data))
@@ -140,26 +218,26 @@ func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEm
 		data = tempMap
 	}
 
-	if len(m.fields) > 0 && m.fields != "*" {
+	if len(m.fields) > 0 {
 		// Keep specified fields.
 		var (
-			set          = gset.NewStrSetFrom(gstr.SplitAndTrim(m.fields, ","))
+			fieldSet     = gset.NewStrSetFrom(gconv.Strings(m.fields))
 			charL, charR = m.db.GetChars()
 			chars        = charL + charR
 		)
-		set.Walk(func(item string) string {
+		fieldSet.Walk(func(item string) string {
 			return gstr.Trim(item, chars)
 		})
 		for k := range data {
 			k = gstr.Trim(k, chars)
-			if !set.Contains(k) {
+			if !fieldSet.Contains(k) {
 				delete(data, k)
 			}
 		}
 	} else if len(m.fieldsEx) > 0 {
 		// Filter specified fields.
-		for _, v := range gstr.SplitAndTrim(m.fieldsEx, ",") {
-			delete(data, v)
+		for _, v := range m.fieldsEx {
+			delete(data, gconv.String(v))
 		}
 	}
 	return data, nil
@@ -169,7 +247,7 @@ func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEm
 // The parameter `master` specifies whether using the master node if master-slave configured.
 func (m *Model) getLink(master bool) Link {
 	if m.tx != nil {
-		return &txLink{m.tx.tx}
+		return &txLink{m.tx.GetSqlTX()}
 	}
 	linkType := m.linkType
 	if linkType == 0 {
@@ -213,7 +291,7 @@ func (m *Model) getPrimaryKey() string {
 	return ""
 }
 
-// mergeArguments creates and returns new arguments by merging <m.extraArgs> and given `args`.
+// mergeArguments creates and returns new arguments by merging `m.extraArgs` and given `args`.
 func (m *Model) mergeArguments(args []interface{}) []interface{} {
 	if len(m.extraArgs) > 0 {
 		newArgs := make([]interface{}, len(m.extraArgs)+len(args))
